@@ -64,35 +64,35 @@ def df_from_root(filename,treename,columnsre=None):
         
 
         
-        df['N']    = df.filter(regex='Amp.*').count(axis=1) 
-        df['Eavg'] = df.filter(regex='^P[0-9]+').mean(axis=1,skipna=True)
-        df['sE']   = df.filter(regex='^P[0-9]+').std(axis=1,skipna=True)/df['Eavg']
-        df['tavg'] = df.filter(regex='^t[0-9]+').mean(axis=1,skipna=True) 
-        df['st']   = df.filter(regex='^t[0-9]+').std(axis=1,skipna=True)
+    df['N']    = df.filter(regex='Amp.*').count(axis=1) 
+    df['Eavg'] = df.filter(regex='^P[0-9]+').mean(axis=1,skipna=True)
+    df['sE']   = df.filter(regex='^P[0-9]+').std(axis=1,skipna=True)/df['Eavg']
+    df['tavg'] = df.filter(regex='^t[0-9]+').mean(axis=1,skipna=True) 
+    df['st']   = df.filter(regex='^t[0-9]+').std(axis=1,skipna=True)
         
-        df['W']    = df.filter(regex='^w[0-9]+').sum(axis=1,skipna=True)
+    df['W']    = df.filter(regex='^w[0-9]+').sum(axis=1,skipna=True)
         
-        #print(df.filter(regex='^w[0-9]+').columns.values)
+    #print(df.filter(regex='^w[0-9]+').columns.values)
 
-        df['IW']   = df.filter(regex='iw[0-9]+').sum(axis=1,skipna=True)
-        
-        df['ZA']   = df.filter(regex='iwz[0-9]+').sum(axis=1,skipna=True)/df['IW']
-        df['X']   = df.filter(regex='wx[0-9]+').sum(axis=1,skipna=True)/df['W']
-        df['Y']   = df.filter(regex='wy[0-9]+').sum(axis=1,skipna=True)/df['W']
-        df['r']   = np.sqrt(df['X']**2 + df['Y']**2)
+    df['IW']   = df.filter(regex='iw[0-9]+').sum(axis=1,skipna=True)
+       
+    df['ZA']   = df.filter(regex='iwz[0-9]+').sum(axis=1,skipna=True)/df['IW']
+    df['X']   = df.filter(regex='wx[0-9]+').sum(axis=1,skipna=True)/df['W']
+    df['Y']   = df.filter(regex='wy[0-9]+').sum(axis=1,skipna=True)/df['W']
+    df['r']   = np.sqrt(df['X']**2 + df['Y']**2)
     
-        df['Sxy']   = df.filter(regex='wxy[0-9]+').sum(axis=1,skipna=True)/df['W'] - df['X']*df['Y']
-        df['Sxx']   = df.filter(regex='wxx[0-9]+').sum(axis=1,skipna=True)/df['W'] - df['X']*df['X']
-        df['Syy']   = df.filter(regex='wyy[0-9]+').sum(axis=1,skipna=True)/df['W'] - df['Y']*df['Y']
-        
-        with np.errstate(divide='ignore', invalid='ignore'):       
-            df['Corr'] = df['Sxy']/np.sqrt(df['Sxx']*df['Syy'])
+    df['Sxy']   = df.filter(regex='wxy[0-9]+').sum(axis=1,skipna=True)/df['W'] - df['X']*df['Y']
+    df['Sxx']   = df.filter(regex='wxx[0-9]+').sum(axis=1,skipna=True)/df['W'] - df['X']*df['X']
+    df['Syy']   = df.filter(regex='wyy[0-9]+').sum(axis=1,skipna=True)/df['W'] - df['Y']*df['Y']
+    
+    with np.errstate(divide='ignore', invalid='ignore'):       
+        df['Corr'] = df['Sxy']/np.sqrt(df['Sxx']*df['Syy'])
 
-        logger.info(df)
+    logger.info(df)
 
-        if (columnsre):
-            return df.filter(columnsre)
-        else : 
-            return df
+    if (columnsre):
+        return df.filter(columnsre)
+    else : 
+        return df
 
 

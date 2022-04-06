@@ -28,21 +28,29 @@ def df_from_root(filename,treename,columnsre=None):
     converting from root to a format suitable for manipulation 
     """
 
-    # open file and load tree
+    # prepare data: open file and load tree, then convert to dataframe
+    logger.info(' Preparing data...')
+
     f_ = uproot.open(filename)
     t_ = f_[treename]
     
-    # prints number of entries and names of variables
     logger.info('Entries in file 0: ' + str(t_.num_entries))
     logger.info(t_.keys())
 
-    # convert tree to dataframe 
     df = t_.arrays(library="pd")
+
+    
+    # cleanup and add features 
+    logger.info(' Cleaning up dataset and adding features ...')
 
     ibots = [ re.sub(r'[a-zA-Z]*', '', s) for s in df.filter(regex="AmpBot.*").columns.values ]
 
     for i in ibots:
-    
+
+        # replace unphysical values in TDC (failed fits) with nan
+        df.loc[df['TDCBot'+i] < 50, 'TDCBot'+i] = np.nan
+        df.loc[df['TDCTop'+i] < 50, 'TDCTop'+i] = np.nan
+        
         with np.errstate(divide='ignore', invalid='ignore'):           #  https://stackoverflow.com/questions/21752989/numpy-efficiently-avoid-0s-when-taking-logmatrix
             df['P'+i] = np.sqrt(df['AmpBot'+i]*df['AmpTop'+i])
             df['z'+i] = np.log(df['AmpBot'+i]/df['AmpTop'+i])
@@ -63,8 +71,8 @@ def df_from_root(filename,treename,columnsre=None):
         df['t'+i] = df['TDCBot'+i]+df['TDCTop'+i]
         
 
-        
-    df['N']    = df.filter(regex='Amp.*').count(axis=1) 
+    df['N']    = df.filter(regex='Amp.*').count(axis=1)
+    df['logN'] = np.log(df.filter(regex='Amp.*').count(axis=1))
     df['Eavg'] = df.filter(regex='^P[0-9]+').mean(axis=1,skipna=True)
     df['sE']   = df.filter(regex='^P[0-9]+').std(axis=1,skipna=True)/df['Eavg']
     df['tavg'] = df.filter(regex='^t[0-9]+').mean(axis=1,skipna=True) 
@@ -84,10 +92,19 @@ def df_from_root(filename,treename,columnsre=None):
     df['Sxy']   = df.filter(regex='wxy[0-9]+').sum(axis=1,skipna=True)/df['W'] - df['X']*df['Y']
     df['Sxx']   = df.filter(regex='wxx[0-9]+').sum(axis=1,skipna=True)/df['W'] - df['X']*df['X']
     df['Syy']   = df.filter(regex='wyy[0-9]+').sum(axis=1,skipna=True)/df['W'] - df['Y']*df['Y']
-    
-    with np.errstate(divide='ignore', invalid='ignore'):       
-        df['Corr'] = df['Sxy']/np.sqrt(df['Sxx']*df['Syy'])
 
+    with np.errstate(divide='ignore', invalid='ignore'):
+        df['Corr'] = df['Sxy']/np.sqrt(df['Sxx']*df['Syy'])
+    df['Corr'].replace([np.inf], 1, inplace=True)
+    df['Corr'].replace([-np.inf], 1, inplace=True)
+    df.loc[df['Corr']>1, 'Corr'] = 1
+    df.loc[df['Corr']<-1, 'Corr'] = -1
+
+    # remove outliers ; this might be a pileup event of some sort 
+    logger.info('Should keep record of selection of outliers; also, this should probably be done elsewhere') 
+    df.loc[df['st']>100,'st'] = np.nan
+    
+    
     logger.info(df)
 
     if (columnsre):

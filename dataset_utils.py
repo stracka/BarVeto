@@ -77,6 +77,7 @@ def df_from_root(filename,treename,columnsre=None):
     df['sE']   = df.filter(regex='^P[0-9]+').std(axis=1,skipna=True)/df['Eavg']
     df['tavg'] = df.filter(regex='^t[0-9]+').mean(axis=1,skipna=True) 
     df['st']   = df.filter(regex='^t[0-9]+').std(axis=1,skipna=True)
+    df['sdt']  = df.filter(regex='^dt[0-9]+').std(axis=1,skipna=True) # equivalent to Marta's delta_z
         
     df['W']    = df.filter(regex='^w[0-9]+').sum(axis=1,skipna=True)
         
@@ -103,8 +104,9 @@ def df_from_root(filename,treename,columnsre=None):
     # remove outliers ; this might be a pileup event of some sort 
     logger.info('Should keep record of selection of outliers; also, this should probably be done elsewhere') 
     df.loc[df['st']>100,'st'] = np.nan
-    
-    
+    df.loc[df['sdt']>100,'sdt'] = np.nan
+    logger.info(df['sdt'].max(skipna=True))
+
     logger.info(df)
 
     if (columnsre):

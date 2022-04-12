@@ -8,14 +8,20 @@
 #    
 #   # !pip freeze ! grep uproot
 
+#https://docs.python.org/3/library/argparse.html
+
 import logging
 FORMAT = '%(asctime)-15s- %(levelname)s - %(name)s -%(message)s'
-logging.basicConfig(format=FORMAT, level=logging.DEBUG)
+#logging.basicConfig(format=FORMAT, level=logging.DEBUG)
+logging.basicConfig(format=FORMAT, level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
 
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+import random
 
 from sklearn.pipeline        import Pipeline
 from sklearn.impute          import SimpleImputer  #, MissingIndicator
@@ -35,52 +41,132 @@ from plot_utils import *
 
 # load datasets 
 columnsre=None
+
 dfpbar   = df_from_root("OutBarTree_run6201_pbarhold.root","Tree_BarData",columnsre)
 dfcosmic = df_from_root("OutBarTree_run6201_cosmics.root","Tree_BarData",columnsre)
 
+
 # add classification target
-dfcosmic['y'] = 0
-dfpbar['y']   = 1
+target = df_gen_col_name('y',list(dfcosmic.columns.values) + list(dfpbar.columns.values))
+dfcosmic[target] = 0
+dfpbar[target] = 1
 
 
-# reduce variables 
-columnsre = "[a-zA-Z_]+$"  # remove columns referring to bars (i.e., names end with numbers)
-varlist  = list(dfpbar.filter(regex=columnsre).columns.values)
 
-featlist = varlist.copy()
-try:
-    for ivar in ['y','ZA','EventTime','tavg','Sxy','Sxx','Syy','W','IW','X','Y','N','AcosCorr']:
-        featlist.remove(ivar)
-    
-except ValueError:
-    logger.info("Error: some variables do not exist")
-    
-logger.info('selected ' + str(featlist) + ' out of ' + str(varlist) )
-
-
-# reduce and concatenate the two datasets 
-dfall = pd.concat([dfcosmic[varlist],dfpbar[varlist]])
+# concatenate datasets
+dfall = pd.concat([dfcosmic,dfpbar])
 logger.info(str(dfall.shape)+' : '+str(dfpbar.shape) + ' + ' + str(dfcosmic.shape))
+
+
+
+# cleanup raw dataset 
+selections = {
+    '^TDC[a-zA-Z_]*[0-9]+' : (50 , np.inf, np.nan, np.nan)
+    }
+dfall = df_cleanup(dfall, ranges=selections)
+
+
+# transform variables 
+dfall = df_transform_vars(dfall,columnsre=['^P[0-9]+','^z[0-9]+','^dt[0-9]+','^t[0-9]+', '^x[0-9]+', 'y[0-9]+', '^'+target+'$', '^EventTime$'])
+
+
+# cleanup transformed dataset 
+selections = {
+    '^P[0-9]+' : (-np.inf , np.inf, np.nan, np.nan),
+    '^z[0-9]+' : (-10 , 10 , np.nan, np.nan), 
+    '^dt[0-9]+': (-1.0e-7 , 1.0e-7, np.nan, np.nan),  
+    '^t[0-9]+' : (50 , np.inf, np.nan, np.nan)
+    }
+dfall = df_cleanup(dfall, ranges=selections)
+
+logger.info(dfall)
+#dfall.plot(x='dt0',y='z0',kind='hexbin',gridsize=50) #,vmax=10)  #plt.show()  #plt.clf()
+
+
+# add and shrink variables 
+columnsre = ["[a-zA-Z_]+$"] # vars for bar end w/ number and are dropped
+dfall = df_extra_vars(dfall,columnsre)
+
+
+# cleanup transformed dataset 
+selections = {
+    '^st$' : (-1e-7, 1e-7, np.nan, np.nan),
+    }
+dfall = df_cleanup(dfall, ranges=selections)
+
+logger.info(dfall)
+
+
+
+
+# add signalbox category
+sbcat = df_gen_col_name('signalbox',list(dfall.columns.values))
+signalbox = {
+    '^ZA$' : (0,np.inf),
+    }
+dfall = df_category(dfall, catname=sbcat, ranges=signalbox)
+
+
+
+# enrich signal sample by removing signal events not in signalbox
+dfall = dfall.loc[ (dfall[target]==0) | (( dfall[target]==1 ) & (dfall[sbcat]==1)) ]
+
+
+logger.info(dfall)
+
+
+
+
+# variable selection 
+
+featlist = ['logN','Eavg','sE','r','Corr'] 
+for ifeat in featlist:  # check the variables are in varlist, remove otherwise
+    if not ifeat in list(dfall.columns.values):
+        featlist.remove(ifeat)
+
+auxlist  = ['ZA','EventTime'] 
+for ifeat in auxlist:  # check the variables are in varlist, remove otherwise
+    if not ifeat in list(dfall.columns.values):
+        auxlist.remove(ifeat)
+
+logger.info('all variables ' + str(dfall.columns.values))
+logger.info('train on ' + str(featlist) + 'project on' + str(auxlist) )
+
+
+
+
+plot_corr(dfall,featlist)
+plt.savefig('correlations.png')
+#plt.show()
+plt.clf()
+
+#plot_pairs(dfall,featlist)
+#plt.show()
+#plt.clf()
+
+
+nsel=0
+plot_diff( dfall.loc[dfall.N>0],
+           targetvar=target, sbvar=sbcat,
+           ncols=3, nrows=2, 
+           varstoplot=featlist ) 
+plt.savefig("features.png")
+#plt.show()
+plt.clf()
+
+
 
 
 
 # prepare datasets and check for any nan feature
 X = dfall[featlist].to_numpy()
-y = dfall['y'].to_numpy()
+y = dfall[target].to_numpy()
+
+aux = dfall[auxlist].to_numpy()
+sb = dfall[sbcat].to_numpy()
+
 logger.info(str(X.shape)+ ' ' + str(y.shape))
 logger.info('feature set contains nan? '+str(np.isnan(X).any()) )
-
-plot_corr(dfall,featlist)
-plt.show()
-
-plot_pairs(dfall,featlist)
-plt.show()
-
-plot_diff(dfall[dfall.y==1],dfall[dfall.y==0],['ZA']+featlist)
-plt.show()
-
-
-
 
 
 # create iterator
@@ -92,13 +178,12 @@ pipe = Pipeline(estimators)
 
 logger.info('Pipeline parameters:\n' + str(pipe.get_params()))
 
-p_grid = { "RF__max_depth" : [5],
+p_grid = { "RF__max_depth" : [5,10,None],
            "RF__n_estimators" : [100] ,
-           "RF__min_samples_split" : [5] ,              
-           "RF__max_features" : [0.4,0.99] }
+           "RF__min_samples_split" : [2,5] , 
+           "RF__max_features" : [0.4,1.] }
 
 clf = GridSearchCV(estimator=pipe, param_grid=p_grid, cv=inner_cv, scoring='roc_auc')
-
 
 # in principle, could get param_name and range from p_grid
 # use flat cross-validation on one 'outer split'
@@ -107,21 +192,55 @@ itrain,itest = next(outer_cv.split(X,y))
 X_train, X_test = X[itrain, :], X[itest, :]
 y_train, y_test = y[itrain], y[itest]
 
+aux_train, aux_test = aux[itrain, :], aux[itest, :]
+sb_train, sb_test = sb[itrain], sb[itest]
+
 # get the best estimator on this train/test
 clf.fit(X_train,y_train)
 logger.info("Tuned best params: {}".format(clf.best_params_))
 
+
+for var, imp in zip(featlist, clf.best_estimator_.steps[1][1].feature_importances_):
+    logger.info(f'{var}: {imp}')
+
+
+y_out = clf.predict_proba(X_test)[:,1]
+y_pred = clf.predict(X_test)
+
+    
+plot_roc(y_test,y_out,sb_test)
+plt.savefig('roc.png')
+plt.clf()
+
+
+'''
+init_rate = len(dfcosmic)/(dfcosmic.EventTime.max() - dfcosmic.EventTime.min())
+logger.info(f'Initial rate: {init_rate} Hz')
+'''
+'''
+
+_a,_bins,_c = plt.hist(df_test.loc[(df_test.yUR==1) & (df_test.ZA>=0),'y_out'],density=True,bins=100)
+_a,_b,_c = plt.hist(df_test.loc[(df_test.yUR==0) & (df_test.ZA>=0),'y_out'],density=True,alpha=0.6,bins=_bins)
+plt.savefig('y_out.png')
+plt.clf()
+'''
+
+
+'''
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import ConfusionMatrixDisplay
-
-y_pred = clf.predict(X_test)
 cm = confusion_matrix(y_test, y_pred)
 logger.info(cm)
-
 cm_display = ConfusionMatrixDisplay(cm).plot()
 plt.show()
+'''
 
-
+'''
+ns=len(df_test.loc[(df_test.y==1) & (df_test.y_out>yt)])-len(df_test.loc[(df_test.y==0) & (df_test.ZA>=0) & (df_test.y_out>yt)])
+nb=len(df_test.loc[(df_test.y==0) & (df_test.y_out>yt)])
+'''
+    
+'''
 param_name = "RF__n_estimators"
 param_range = [1,2,5,10,100]
 train_scores, test_scores = validation_curve(
@@ -130,8 +249,8 @@ train_scores, test_scores = validation_curve(
     y=y,
     param_name=param_name,
     param_range=param_range,
-    cv=inner_cv,
-    scoring='roc_auc')
+    cv=inner_cv, 
+    scoring='roc_auc') 
 
 train_scores_mean = np.mean(train_scores, axis=1)
 train_scores_std = np.std(train_scores, axis=1)
@@ -146,7 +265,7 @@ plt.ylim(0.0, 1.1)
 lw = 2
 plt.semilogx(
     param_range, train_scores_mean, label="Training score", color="darkorange", lw=lw
-)
+) 
 plt.fill_between(
     param_range,
     train_scores_mean - train_scores_std,
@@ -167,8 +286,8 @@ plt.fill_between(
     lw=lw,
 )
 plt.legend(loc="best")
-#plt.show()
-
+plt.show()
+'''
 
 
 #https://scikit-learn.org/stable/auto_examples/model_selection/plot_randomized_search.html#sphx-glr-auto-examples-model-selection-plot-randomized-search-py
@@ -178,7 +297,6 @@ plt.legend(loc="best")
 #logger.info("Scores for each run of cross-validation: {}".format(cv_score))
 ## https://machinelearningmastery.com/nested-cross-validation-for-machine-learning-with-python/
 ## https://arxiv.org/pdf/1809.09446.pdf
-
 
 
 '''
@@ -252,47 +370,6 @@ param_range1 = [i / 10000.0 for i in range(1, 11)]
 
 '''
 
-'''
-# plotting as a function of train size
-def plot_learning_curve(train_sizes, train_scores, test_scores, title, alpha=0.1):
-    train_mean = np.mean(train_scores, axis=1)
-    train_std = np.std(train_scores, axis=1)
-    test_mean = np.mean(test_scores, axis=1)
-    test_std = np.std(test_scores, axis=1)
-    plt.plot(train_sizes, train_mean, label='train score', color='blue', marker='o')
-    plt.fill_between(train_sizes, train_mean + train_std,
-                     train_mean - train_std, color='blue', alpha=alpha)
-    plt.plot(train_sizes, test_mean, label='test score', color='red', marker='o')
-
-    plt.fill_between(train_sizes, test_mean + test_std, test_mean - test_std, color='red', alpha=alpha)
-    plt.title(title)
-    plt.xlabel('Number of training points')
-    plt.ylabel('F-measure')
-    plt.grid(ls='--')
-    plt.legend(loc='best')
-    plt.show()
-
-# plotting as a function of parameter
-def plot_validation_curve(param_range, train_scores, test_scores, title, alpha=0.1):
-    param_range = [x[1] for x in param_range] 
-    sort_idx = np.argsort(param_range)
-    param_range=np.array(param_range)[sort_idx]
-    train_mean = np.mean(train_scores, axis=1)[sort_idx]
-    train_std = np.std(train_scores, axis=1)[sort_idx]
-    test_mean = np.mean(test_scores, axis=1)[sort_idx]
-    test_std = np.std(test_scores, axis=1)[sort_idx]
-    plt.plot(param_range, train_mean, label='train score', color='blue', marker='o')
-    plt.fill_between(param_range, train_mean + train_std,
-                 train_mean - train_std, color='blue', alpha=alpha)
-    plt.plot(param_range, test_mean, label='test score', color='red', marker='o')
-    plt.fill_between(param_range, test_mean + test_std, test_mean - test_std, color='red', alpha=alpha)
-    plt.title(title)
-    plt.grid(ls='--')
-    plt.xlabel('Weight of class 2')
-    plt.ylabel('Average values and standard deviation for F1-Score')
-    plt.legend(loc='best')
-    plt.show()
-'''
     
 
 #>>> clf.predict(X)  # predict classes of the training data
@@ -300,8 +377,7 @@ def plot_validation_curve(param_range, train_scores, test_scores, title, alpha=0
 
 
 #selection=(np.abs(dfpbar.dt0) < 5e-8)#  & (dfpbar.Bar0==0)
-#dfpbar[selection].plot(x='dt0',y='z0',kind='hexbin',gridsize=50) #,vmax=10)
-#plt.show()
+
 
 #reduce the EventTime ranges in the two trees; here values are hard-coded 
 #dfcosmic['EventTimeBin'] = pd.cut(dfcosmic['EventTime'],bins=np.linspace(10,160,101),labels=np.arange(0,100))

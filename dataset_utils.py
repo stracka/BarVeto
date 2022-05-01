@@ -1,9 +1,6 @@
 # 
-# Utilities for dealing with datasets 
+# Utilities for dealing with datasets and adding variables 
 #
-# Add function testing. 
-#
-#   # !pip freeze ! grep uproot
 #
 
 import logging
@@ -14,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import re
 import random
+import warnings
 
 FORMAT = '%(asctime)-15s- %(levelname)s - %(name)s -%(message)s'
 logging.basicConfig(format=FORMAT, level=logging.DEBUG)
@@ -198,7 +196,7 @@ def df_extra_vars(data,columnsre=None):
     df['Corr'].replace([-np.inf], 1, inplace=True)
     df.loc[df['Corr']>1, 'Corr'] = 1
     df.loc[df['Corr']<-1, 'Corr'] = -1
-
+    
     logger.info(columnsre) 
     logger.info(df)
 
@@ -212,5 +210,92 @@ def df_extra_vars(data,columnsre=None):
     else:
         return df
 
+def df_pair_vars(data,columnsre=None):
+    """  
+    these variables are calculated from all arrangements  
+    (disposizioni) of the provided columns 
+    """
+
+    df = data.copy()
+
+    tofdatain = df.filter(regex='^t[0-9]+$', axis=1).to_numpy()
+
+    cols = []
+    phis_over_two = []
+    ibar = [ re.sub(r'[a-zA-Z]*', '', s) for s in df.filter(regex="^P[0-9]+").columns.values ]
+    for i in ibar:
+        phis_over_two+=[int(i) * np.pi / len(ibar)]
+        #cols+=['t'+i]
+        cols+=['P'+i]
+    phidatain = np.where(~np.isnan(df.filter(cols, axis=1).to_numpy()),phis_over_two,np.nan)
+
+    
+    xtof = val_permutedcols(tofdatain,[np.subtract],1)
+ 
+    maxtof= np.nanmax(xtof,1)
+    stdtof= np.nanstd(xtof,1)
+    meantof= np.nanmean(xtof,1)  
+    mintof= np.nanmin(xtof,1)
+   
+    df[['max_tof','std_tof','mean_tof','min_tof']] = np.vstack([maxtof,stdtof,meantof,mintof]).transpose()
+
+    
+    xchord=val_permutedcols(phidatain,[np.subtract,np.sin],1)
+
+    maxchord= np.nanmax(xchord,1)
+    stdchord= np.nanstd(xchord,1)
+    meanchord= np.nanmean(xchord,1)  
+    minchord= np.nanmin(xchord,1)
+
+    df[['max_halfchord','std_halfchord','mean_halfchord','min_halfchord']] = np.vstack([maxchord,stdchord,meanchord,minchord]).transpose()
 
 
+    xvel = xtof / xchord
+ 
+    maxvel= np.nanmax(xvel,1)
+    stdvel= np.nanstd(xvel,1)
+    meanvel= np.nanmean(xvel,1)  
+    minvel= np.nanmin(xvel,1)
+   
+    df[['max_vel','std_vel','mean_vel','min_vel']] = np.vstack([maxvel,stdvel,meanvel,minvel]).transpose()
+    
+    logger.info(columnsre) 
+    logger.info(df)
+
+    if (columnsre):
+        savedcols = []
+        for patt in columnsre: 
+            r = re.compile(patt)
+            savedcols += list(filter(r.match, df.columns.values)) 
+        logger.info(f'These columns will be saved: {savedcols}')
+        return df.filter(items=savedcols)
+    else:
+        return df
+    
+
+def val_permutedcols(arr,uf_list=[np.subtract], axis=1):
+    """
+    subsequently apply ufuncs from a list to combination of columns using broadcast
+    https://numpy.org/doc/stable/user/basics.broadcasting.html
+    https://stackoverflow.com/questions/55353703/how-to-calculate-all-combinations-of-difference-between-array-elements-in-2d
+    """    
+
+    # get shape and obtain broadcastable shapes by introducing singleton dimensions
+    s = arr.shape
+    s1=np.insert(s,axis,1)
+    s2=np.insert(s,axis+1,1)
+
+
+    # apply ufuncs after reshaping input broadcastable arrays against each other
+    # first ufunc operate on two arrays, the remaining ones operate on the output
+    uf = uf_list[0]
+    x=uf(arr.reshape(s1),arr.reshape(s2))
+    for uf in uf_list[1:]:
+        x=uf(x)
+
+    # set elements on or below diagonal to nan, then reshape
+    x = np.abs(x) + np.tril(np.ones_like(x)*np.nan)
+    x = x.reshape(s[axis-1],-1)
+
+    return x
+    

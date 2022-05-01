@@ -3,8 +3,6 @@
 #
 # 
 #
-#   # !pip freeze ! grep uproot
-#
 
 import logging
 import itertools
@@ -160,32 +158,60 @@ def plot_roc(y, out, sb=None) :
 
     brej = 1.-beff
 
-    plt.plot(brej,seff)
+    plt.plot(brej,seff,'o-')
+
     return plt
 
 
 
 
 
+def plot_rate(y, out, rate, sb=None) : 
+    """
+    ToDo: replace ns0 etc. with a formula related to a matrix of the probabilities in each bag
+    """ 
+        
+    data = np.column_stack([y,out])
+    df = pd.DataFrame(data,columns=['y','out'])
+
+    if sb is not None:
+        df['sb'] = sb
+    else:
+        df['sb'] = 1
+
+    minout = df['out'].min()
+    maxout = df['out'].max()
+    
+    seff=np.array([])
+    beff=np.array([])
+    yts =np.array([])
+    
+    ns0=len(df.loc[ (df.y==1) & (df.sb==1) ]) - len(df.loc[ (df.y==0) & (df.sb==1) ]) 
+    nb0=len(df.loc[ (df.y==0) ] )
+    
+    for yt in np.linspace(minout,maxout,1000):
+        ns=len(df.loc[ (df.y==1) & (df.sb==1) & (df.out>yt)]) - len(df.loc[ (df.y==0) & (df.sb==1)  & (df.out>yt)]) 
+        nb=len(df.loc[ (df.y==0) & (df.out>yt) ] )
+
+        yts = np.append(yts, yt)
+        seff = np.append(seff,ns/ns0)
+        beff = np.append(beff,nb/nb0)
+
+    brej = beff * rate
+
+    plt.plot(seff,brej,'o-')
+    
+    plt.yscale('log')
+    plt.xticks(ticks=list(np.linspace(0,1,11)))
+    plt.xlabel("signal efficiency")
+    plt.ylabel("background rate (Hz)")
+    plt.grid()
+
+    return plt
+
+
 '''
-df_roc.plot(x='effS',y='rateB')
-plt.yscale('log')
-plt.xticks(ticks=list(np.linspace(0,1,11)))
-plt.xlabel("signal efficiency")
-plt.ylabel("background rate (Hz)")
-plt.grid()
-plt.savefig('rate.png')
-plt.clf()
-'''
-
-
-
-
-'''
-
-
 #dfpbar[selection].plot(x='dt0',y='z0',kind='hexbin',gridsize=50) #,vmax=10)
 #plt.hist(dfpbar['dt0'],bins=100) #,vmax=10)
 #plt.show()
-
 '''
